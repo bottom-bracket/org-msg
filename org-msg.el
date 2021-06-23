@@ -35,6 +35,7 @@
 (require 'cl-seq)
 (require 'gnus-art)
 (require 'gnus-cite)
+(require 'gnus-dired)
 (require 'gnus-msg)
 (require 'htmlize)
 (require 'message)
@@ -1022,6 +1023,21 @@ If FILE does not have an extension, \"text/plain\" is returned."
       (mailcap-extension-to-mime extension)
     "text/plain"))
 
+(defun org-msg-dired-attach (orig-fun files-to-attach)
+  "Attach dired's marked files to a OrgMsg message composition.
+This function is used as an advice function of
+`gnus-dired-attach'."
+  (cl-flet* ((mail-buffer-p (b)
+	      (with-current-buffer b
+		(and (derived-mode-p 'org-msg-edit-mode)
+		     (null message-sent-message-via))))
+	     (mail-buffers ()
+	      (when-let (bufs (cl-remove-if-not #'mail-buffer-p (buffer-list)))
+		(mapcar 'buffer-name bufs))))
+    (cl-letf (((symbol-function #'mml-attach-file) #'org-msg-attach-attach)
+	      ((symbol-function #'gnus-dired-mail-buffers) #'mail-buffers))
+      (funcall orig-fun files-to-attach))))
+
 (defun org-msg-mml-into-multipart-related (orig-fun cont)
   "Extend the capability to handle file attachments.
 This function is used as an advice function of
@@ -1265,7 +1281,7 @@ function is called.  `org-cycle' is called otherwise."
       (org-cycle)
     (message-tab)))
 
-(defun org-msg-attach-attach (file)
+(defun org-msg-attach-attach (file &rest _args)
   "Link FILE into the list of attachment."
   (interactive (list (read-file-name "File to attach: ")))
   (let ((files (org-msg-get-prop "attachment")))
@@ -1403,6 +1419,7 @@ HTML emails."
 	(unless (org-msg-mml-recursive-support)
 	  (advice-add 'mml-expand-html-into-multipart-related
 		      :around #'org-msg-mml-into-multipart-related))
+	(advice-add 'gnus-dired-attach :around #'org-msg-dired-attach)
 	(advice-add 'org-html--todo :around #'org-msg-html--todo)
 	(when (boundp 'bbdb-mua-mode-alist)
 	  (add-to-list 'bbdb-mua-mode-alist '(message org-msg-edit-mode))))
@@ -1414,6 +1431,7 @@ HTML emails."
     (unless (org-msg-mml-recursive-support)
       (advice-remove 'mml-expand-html-into-multipart-related
 		     #'org-msg-mml-into-multipart-related))
+    (advice-remove 'gnus-dired-attach #'org-msg-dired-attach)
     (advice-remove 'org-html--todo #'org-msg-html--todo)
     (when (boundp 'bbdb-mua-mode-alist)
       (setq bbdb-mua-mode-alist (delete '(message org-msg-edit-mode)
